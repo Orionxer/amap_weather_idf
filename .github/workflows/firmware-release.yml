@@ -152,13 +152,14 @@ jobs:
             gh release edit "${RELEASE_TAG}" \
               --title "${release_title}" \
               --notes "${release_notes}" \
-              --prerelease
+              --prerelease=false \
+              --latest
           else
             gh release create "${RELEASE_TAG}" \
               --verify-tag \
               --title "${release_title}" \
               --notes "${release_notes}" \
-              --prerelease
+              --latest
           fi
 
           gh release upload "${RELEASE_TAG}" "${RELEASE_DIR}"/* --clobber
