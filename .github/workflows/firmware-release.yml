@@ -1,0 +1,164 @@
+name: Firmware Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firmware-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IDF_VERSION: v5.5.3
+  IDF_TARGET: esp32c5
+  ARTIFACT_NAME: firmware-${{ github.sha }}
+  RELEASE_DIR: release
+  RELEASE_TAG: latest
+
+jobs:
+  build:
+    name: Build ESP32-C5 firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: ${{ env.IDF_TARGET }}
+          path: .
+          command: idf.py build
+
+      - name: Prepare release directory
+        run: mkdir -p "${RELEASE_DIR}"
+
+      - name: Create merged firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: ${{ env.IDF_TARGET }}
+          path: build
+          command: >-
+            esptool.py --chip esp32c5 merge_bin
+            -o ../release/amap_weather-esp32c5-merged.bin
+            @flash_args
+
+      - name: Package firmware files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_dir="${RELEASE_DIR}/amap_weather-esp32c5"
+          mkdir -p "${package_dir}/bootloader" "${package_dir}/partition_table"
+
+          cp build/amap_weather.bin "${package_dir}/"
+          cp build/bootloader/bootloader.bin "${package_dir}/bootloader/"
+          cp build/partition_table/partition-table.bin "${package_dir}/partition_table/"
+          cp build/flash_args build/flasher_args.json "${package_dir}/"
+
+          test -s "${RELEASE_DIR}/amap_weather-esp32c5-merged.bin"
+          test -s "${package_dir}/amap_weather.bin"
+          test -s "${package_dir}/bootloader/bootloader.bin"
+          test -s "${package_dir}/partition_table/partition-table.bin"
+
+          (
+            cd "${RELEASE_DIR}"
+            zip -qr amap_weather-esp32c5.zip amap_weather-esp32c5
+            sha256sum \
+              amap_weather-esp32c5-merged.bin \
+              amap_weather-esp32c5.zip \
+              > SHA256SUMS
+          )
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            release/amap_weather-esp32c5-merged.bin
+            release/amap_weather-esp32c5.zip
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Update latest release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.RELEASE_DIR }}
+
+      - name: Move rolling tag to current commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if gh api "repos/${GH_REPO}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh api \
+              --method PATCH \
+              "repos/${GH_REPO}/git/refs/tags/${RELEASE_TAG}" \
+              -f sha="${GITHUB_SHA}" \
+              -F force=true \
+              >/dev/null
+          else
+            gh api \
+              --method POST \
+              "repos/${GH_REPO}/git/refs" \
+              -f ref="refs/tags/${RELEASE_TAG}" \
+              -f sha="${GITHUB_SHA}" \
+              >/dev/null
+          fi
+
+      - name: Create or update rolling release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          release_title="Latest ESP32-C5 firmware"
+          release_notes=$(printf '%s\n\n%s\n%s\n%s\n' \
+            'Automated rolling build from the main branch.' \
+            "- Commit: [${GITHUB_SHA}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})" \
+            "- ESP-IDF: ${IDF_VERSION}" \
+            "- Target: ${IDF_TARGET}")
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" \
+              --title "${release_title}" \
+              --notes "${release_notes}" \
+              --prerelease
+          else
+            gh release create "${RELEASE_TAG}" \
+              --verify-tag \
+              --title "${release_title}" \
+              --notes "${release_notes}" \
+              --prerelease
+          fi
+
+          gh release upload "${RELEASE_TAG}" "${RELEASE_DIR}"/* --clobber

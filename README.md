@@ -1,5 +1,7 @@
 # ESP-IDF 高德实况天气
 
+[![Firmware Release](https://github.com/Orionxer/amap_weather_idf/actions/workflows/firmware-release.yml/badge.svg)](https://github.com/Orionxer/amap_weather_idf/actions/workflows/firmware-release.yml)
+
 工程启动后连接网络，先调用高德 IP 定位接口获取 `adcode`，再使用该
 `adcode` 调用实况天气接口。IP 定位请求或响应不可用时，改为查询广州
 （`adcode=440100`）。
@@ -26,6 +28,33 @@ idf.py menuconfig
 限制为 Error；高德请求及应用日志仍保持默认 Info 级别。
 
 当前工程目标由 `sdkconfig` 中的 `CONFIG_IDF_TARGET` 确定。
+
+## 自动构建与固件下载
+
+GitHub Actions 会在 `main` 分支每次推送后使用 ESP-IDF 5.5.3 构建 ESP32-C5
+固件，并更新 [`latest` 预发布版本](https://github.com/Orionxer/amap_weather_idf/releases/tag/latest)。
+Pull Request 和手动触发只执行构建，产物保留在对应的 Actions 运行记录中。
+
+Release 提供以下文件：
+
+- `amap_weather-esp32c5-merged.bin`：包含 bootloader、分区表和应用程序，
+  从地址 `0x0` 烧录。
+- `amap_weather-esp32c5.zip`：包含各个独立固件文件、`flash_args` 和
+  `flasher_args.json`。
+- `SHA256SUMS`：Release 固件的 SHA-256 校验值。
+
+下载合并固件后可执行：
+
+```sh
+esptool.py --chip esp32c5 -p PORT write_flash 0x0 amap_weather-esp32c5-merged.bin
+```
+
+将 `PORT` 替换为开发板串口。若使用 ZIP 中的独立固件，解压并进入
+`amap_weather-esp32c5` 目录后执行：
+
+```sh
+esptool.py --chip esp32c5 -p PORT write_flash @flash_args
+```
 
 ## 请求流程
 
