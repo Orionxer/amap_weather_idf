@@ -177,7 +177,6 @@ def query_live_weather(adcode: str) -> dict[str, Any]:
         {
             "key": AMAP_KEY,
             "city": adcode,
-            "extensions": "base",
         },
     )
     print_json(f"高德实况天气响应（adcode={adcode}）", payload)

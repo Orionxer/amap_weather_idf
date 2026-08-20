@@ -204,7 +204,7 @@ cleanup:
 static esp_err_t query_live_weather(const char *adcode)
 {
     char url[320];
-    int url_len = snprintf(url, sizeof(url), "%s?key=%s&city=%s&extensions=base",
+    int url_len = snprintf(url, sizeof(url), "%s?key=%s&city=%s",
                            AMAP_WEATHER_URL, CONFIG_AMAP_API_KEY, adcode);
     if (url_len < 0 || (size_t)url_len >= sizeof(url)) {
         ESP_LOGE(TAG, "Weather request URL is too long");
