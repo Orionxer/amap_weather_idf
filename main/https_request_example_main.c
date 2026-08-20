@@ -1,313 +1,260 @@
 /*
- * HTTPS GET Example using plain Mbed TLS sockets
- *
- * Contacts the howsmyssl.com API via TLS v1.2 and reads a JSON
- * response.
- *
- * Adapted from the ssl_client1 example in Mbed TLS.
- *
- * SPDX-FileCopyrightText: The Mbed TLS Contributors
+ * Query AMap IP location first, then query live weather by adcode.
  *
  * SPDX-License-Identifier: Apache-2.0
- *
- * SPDX-FileContributor: 2015-2025 Espressif Systems (Shanghai) CO LTD
  */
 
-#include <string.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <inttypes.h>
-#include <time.h>
-#include <sys/time.h>
+#include <string.h>
+
+#include "cJSON.h"
+#include "esp_crt_bundle.h"
+#include "esp_event.h"
+#include "esp_http_client.h"
+#include "esp_log.h"
+#include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_wifi.h"
-#include "esp_event.h"
-#include "esp_log.h"
-#include "esp_system.h"
-#include "esp_timer.h"
 #include "nvs_flash.h"
-#include "nvs.h"
 #include "protocol_examples_common.h"
-#include "esp_sntp.h"
-#include "esp_netif.h"
-
-#include "lwip/err.h"
-#include "lwip/sockets.h"
-#include "lwip/sys.h"
-#include "lwip/netdb.h"
-#include "lwip/dns.h"
-
-#include "esp_tls.h"
 #include "sdkconfig.h"
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE && CONFIG_EXAMPLE_USING_ESP_TLS_MBEDTLS
-#include "esp_crt_bundle.h"
-#endif
-#include "time_sync.h"
 
-/* Constants that aren't configurable in menuconfig */
-#ifdef CONFIG_EXAMPLE_SSL_PROTO_TLS1_3_CLIENT
-#define WEB_SERVER "tls13.browserleaks.com"
-#define WEB_PORT "443"
-#define WEB_URL "https://tls13.browserleaks.com/tls"
-#else
-#define WEB_SERVER "howsmyssl.com"
-#define WEB_PORT "443"
-#define WEB_URL "https://www.howsmyssl.com/a/check"
-#endif
+#define AMAP_IP_LOCATION_URL "https://restapi.amap.com/v3/ip"
+#define AMAP_WEATHER_URL "https://restapi.amap.com/v3/weather/weatherInfo"
+#define AMAP_REQUEST_TIMEOUT_MS 10000
+#define DEFAULT_CITY_NAME "广州"
+#define DEFAULT_ADCODE "440100"
+#define ADCODE_BUFFER_SIZE 16
+#define RESPONSE_INITIAL_CAPACITY 1024
 
-#define SERVER_URL_MAX_SZ 256
+typedef struct {
+    char *data;
+    size_t length;
+    size_t capacity;
+} http_response_t;
 
-static const char *TAG = "example";
+static const char *TAG = "amap_weather";
 
-/* Timer interval once every day (24 Hours) */
-#define TIME_PERIOD (86400000000ULL)
-
-static const char HOWSMYSSL_REQUEST[] = "GET " WEB_URL " HTTP/1.1\r\n"
-                             "Host: "WEB_SERVER"\r\n"
-                             "User-Agent: esp-idf/1.0 esp32\r\n"
-                             "\r\n";
-
-#ifdef CONFIG_EXAMPLE_CLIENT_SESSION_TICKETS
-static const char LOCAL_SRV_REQUEST[] = "GET " CONFIG_EXAMPLE_LOCAL_SERVER_URL " HTTP/1.1\r\n"
-                             "Host: "WEB_SERVER"\r\n"
-                             "User-Agent: esp-idf/1.0 esp32\r\n"
-                             "\r\n";
-#endif
-
-/* Root cert for howsmyssl.com, taken from server_root_cert.pem
-
-   The PEM file was extracted from the output of this command:
-   openssl s_client -showcerts -connect www.howsmyssl.com:443 </dev/null
-
-   The CA root cert is the last cert given in the chain of certs.
-
-   To embed it in the app binary, the PEM file is named
-   in the component.mk COMPONENT_EMBED_TXTFILES variable.
-*/
-extern const uint8_t server_root_cert_pem_start[] asm("_binary_server_root_cert_pem_start");
-extern const uint8_t server_root_cert_pem_end[]   asm("_binary_server_root_cert_pem_end");
-
-extern const uint8_t local_server_cert_pem_start[] asm("_binary_local_server_cert_pem_start");
-extern const uint8_t local_server_cert_pem_end[]   asm("_binary_local_server_cert_pem_end");
-#if CONFIG_EXAMPLE_USING_ESP_TLS_MBEDTLS
-#if defined(CONFIG_EXAMPLE_SSL_PROTO_TLS1_3_CLIENT)
-static const int server_supported_ciphersuites[] = {MBEDTLS_TLS1_3_AES_256_GCM_SHA384, MBEDTLS_TLS1_3_AES_128_CCM_SHA256, 0};
-static const int server_unsupported_ciphersuites[] = {MBEDTLS_TLS_ECDHE_RSA_WITH_ARIA_128_CBC_SHA256, 0};
-#else
-static const int server_supported_ciphersuites[] = {MBEDTLS_TLS_RSA_WITH_AES_256_GCM_SHA384, MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, 0};
-static const int server_unsupported_ciphersuites[] = {MBEDTLS_TLS_ECDHE_RSA_WITH_ARIA_128_CBC_SHA256, 0};
-#endif // CONFIG_EXAMPLE_SSL_PROTO_TLS1_3_CLIENT
-#endif // CONFIG_EXAMPLE_USING_ESP_TLS_MBEDTLS
-
-#ifdef CONFIG_EXAMPLE_CLIENT_SESSION_TICKETS
-static esp_tls_client_session_t *tls_client_session = NULL;
-static bool save_client_session = false;
-#endif
-
-static void https_get_request(esp_tls_cfg_t cfg, const char *WEB_SERVER_URL, const char *REQUEST)
+static esp_err_t append_response_data(http_response_t *response, const char *data, size_t data_len)
 {
-    char buf[512];
-    int ret, len;
-
-    esp_tls_t *tls = esp_tls_init();
-    if (!tls) {
-        ESP_LOGE(TAG, "Failed to allocate esp_tls handle!");
-        goto exit;
+    if (data_len > SIZE_MAX - response->length - 1) {
+        return ESP_ERR_NO_MEM;
     }
 
-    if (esp_tls_conn_http_new_sync(WEB_SERVER_URL, &cfg, tls) == 1) {
-        ESP_LOGI(TAG, "Connection established...");
-    } else {
-        ESP_LOGE(TAG, "Connection failed...");
-        int esp_tls_code = 0, esp_tls_flags = 0;
-        esp_tls_error_handle_t tls_e = NULL;
-        esp_tls_get_error_handle(tls, &tls_e);
-        /* Try to get TLS stack level error and certificate failure flags, if any */
-        ret = esp_tls_get_and_clear_last_error(tls_e, &esp_tls_code, &esp_tls_flags);
-        if (ret == ESP_OK) {
-            ESP_LOGE(TAG, "TLS error = -0x%x, TLS flags = -0x%x", esp_tls_code, esp_tls_flags);
+    size_t required = response->length + data_len + 1;
+    if (required > response->capacity) {
+        size_t new_capacity = response->capacity == 0 ? RESPONSE_INITIAL_CAPACITY : response->capacity;
+        while (new_capacity < required) {
+            if (new_capacity > SIZE_MAX / 2) {
+                new_capacity = required;
+                break;
+            }
+            new_capacity *= 2;
         }
+
+        char *new_data = realloc(response->data, new_capacity);
+        if (new_data == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+        response->data = new_data;
+        response->capacity = new_capacity;
+    }
+
+    memcpy(response->data + response->length, data, data_len);
+    response->length += data_len;
+    response->data[response->length] = '\0';
+    return ESP_OK;
+}
+
+static esp_err_t http_event_handler(esp_http_client_event_t *event)
+{
+    http_response_t *response = event->user_data;
+
+    if (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0) {
+        esp_err_t err = append_response_data(response, event->data, event->data_len);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to allocate HTTP response buffer");
+            return err;
+        }
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t request_json(const char *url, const char *response_name, cJSON **json)
+{
+    http_response_t response = {0};
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = AMAP_REQUEST_TIMEOUT_MS,
+        .user_agent = "amap-weather-esp-idf/1.0",
+        .event_handler = http_event_handler,
+        .user_data = &response,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    *json = NULL;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize HTTP client");
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_http_client_set_header(client, "Accept", "application/json");
+    esp_err_t err = esp_http_client_perform(client);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(err));
         goto cleanup;
     }
 
-    size_t written_bytes = 0;
-    do {
-        ret = esp_tls_conn_write(tls,
-                                 REQUEST + written_bytes,
-                                 strlen(REQUEST) - written_bytes);
-        if (ret >= 0) {
-            ESP_LOGI(TAG, "%d bytes written", ret);
-            written_bytes += ret;
-        } else if (ret != ESP_TLS_ERR_SSL_WANT_READ  && ret != ESP_TLS_ERR_SSL_WANT_WRITE) {
-            ESP_LOGE(TAG, "esp_tls_conn_write  returned: [0x%02X](%s)", ret, esp_err_to_name(ret));
-            goto cleanup;
-        }
-    } while (written_bytes < strlen(REQUEST));
-
-    ESP_LOGI(TAG, "Reading HTTP response...");
-    do {
-        len = sizeof(buf) - 1;
-        memset(buf, 0x00, sizeof(buf));
-        ret = esp_tls_conn_read(tls, (char *)buf, len);
-
-        if (ret == ESP_TLS_ERR_SSL_WANT_WRITE  || ret == ESP_TLS_ERR_SSL_WANT_READ) {
-            continue;
-        } else if (ret < 0) {
-            ESP_LOGE(TAG, "esp_tls_conn_read  returned [-0x%02X](%s)", -ret, esp_err_to_name(ret));
-            break;
-        } else if (ret == 0) {
-            ESP_LOGI(TAG, "connection closed");
-            break;
-        }
-
-        len = ret;
-        ESP_LOGD(TAG, "%d bytes read", len);
-        /* Print response directly to stdout as it is read */
-        for (int i = 0; i < len; i++) {
-            putchar(buf[i]);
-        }
-        putchar('\n'); // JSON output doesn't have a newline at end
-    } while (1);
-
-#ifdef CONFIG_EXAMPLE_CLIENT_SESSION_TICKETS
-    /* The TLS session is successfully established, now saving the session ctx for reuse */
-    if (save_client_session) {
-        esp_tls_free_client_session(tls_client_session);
-        tls_client_session = esp_tls_get_client_session(tls);
+    int status_code = esp_http_client_get_status_code(client);
+    if (status_code < 200 || status_code >= 300) {
+        ESP_LOGE(TAG, "HTTP request returned status code %d", status_code);
+        err = ESP_FAIL;
+        goto cleanup;
     }
-#endif
+
+    if (response.data == NULL || response.length == 0) {
+        ESP_LOGE(TAG, "HTTP response body is empty");
+        err = ESP_FAIL;
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "%s: %s", response_name, response.data);
+
+    *json = cJSON_ParseWithLength(response.data, response.length);
+    if (*json == NULL) {
+        ESP_LOGE(TAG, "HTTP response is not valid JSON");
+        err = ESP_FAIL;
+        goto cleanup;
+    }
 
 cleanup:
-    esp_tls_conn_destroy(tls);
-exit:
-    for (int countdown = 10; countdown >= 0; countdown--) {
-        ESP_LOGI(TAG, "%d...", countdown);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    esp_http_client_cleanup(client);
+    free(response.data);
+    return err;
+}
+
+static esp_err_t require_amap_success(const cJSON *json, const char *api_name)
+{
+    if (!cJSON_IsObject(json)) {
+        ESP_LOGE(TAG, "%s response is not a JSON object", api_name);
+        return ESP_FAIL;
     }
+
+    const cJSON *status = cJSON_GetObjectItemCaseSensitive(json, "status");
+    if (!cJSON_IsString(status) || strcmp(status->valuestring, "1") != 0) {
+        const cJSON *info = cJSON_GetObjectItemCaseSensitive(json, "info");
+        const cJSON *infocode = cJSON_GetObjectItemCaseSensitive(json, "infocode");
+        ESP_LOGE(TAG, "%s failed: %s (infocode=%s)",
+                 api_name,
+                 cJSON_IsString(info) ? info->valuestring : "unknown error",
+                 cJSON_IsString(infocode) ? infocode->valuestring : "unknown");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
 }
 
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE && CONFIG_EXAMPLE_USING_ESP_TLS_MBEDTLS
-static void https_get_request_using_crt_bundle(void)
+static esp_err_t query_ip_location(char *adcode, size_t adcode_size)
 {
-    ESP_LOGI(TAG, "https_request using crt bundle");
-    esp_tls_cfg_t cfg = {
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-    https_get_request(cfg, WEB_URL, HOWSMYSSL_REQUEST);
+    char url[256];
+    int url_len = snprintf(url, sizeof(url), "%s?key=%s", AMAP_IP_LOCATION_URL, CONFIG_AMAP_API_KEY);
+    if (url_len < 0 || (size_t)url_len >= sizeof(url)) {
+        ESP_LOGE(TAG, "IP location request URL is too long");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    cJSON *json = NULL;
+    esp_err_t err = request_json(url, "AMap IP location response", &json);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = require_amap_success(json, "IP location");
+    if (err != ESP_OK) {
+        goto cleanup;
+    }
+
+    const cJSON *adcode_item = cJSON_GetObjectItemCaseSensitive(json, "adcode");
+    if (!cJSON_IsString(adcode_item) || adcode_item->valuestring[0] == '\0') {
+        ESP_LOGE(TAG, "IP location response does not contain a usable adcode");
+        err = ESP_FAIL;
+        goto cleanup;
+    }
+
+    size_t adcode_len = strlen(adcode_item->valuestring);
+    if (adcode_len >= adcode_size) {
+        ESP_LOGE(TAG, "IP location adcode is too long");
+        err = ESP_ERR_INVALID_SIZE;
+        goto cleanup;
+    }
+
+    memcpy(adcode, adcode_item->valuestring, adcode_len + 1);
+
+cleanup:
+    cJSON_Delete(json);
+    return err;
 }
-#endif // CONFIG_MBEDTLS_CERTIFICATE_BUNDLE && CONFIG_EXAMPLE_USING_ESP_TLS_MBEDTLS
 
-static void https_get_request_using_cacert_buf(void)
+static esp_err_t query_live_weather(const char *adcode)
 {
-    ESP_LOGI(TAG, "https_request using cacert_buf");
-    esp_tls_cfg_t cfg = {
-        .cacert_buf = (const unsigned char *) server_root_cert_pem_start,
-        .cacert_bytes = server_root_cert_pem_end - server_root_cert_pem_start,
-    };
-    https_get_request(cfg, WEB_URL, HOWSMYSSL_REQUEST);
+    char url[320];
+    int url_len = snprintf(url, sizeof(url), "%s?key=%s&city=%s&extensions=base",
+                           AMAP_WEATHER_URL, CONFIG_AMAP_API_KEY, adcode);
+    if (url_len < 0 || (size_t)url_len >= sizeof(url)) {
+        ESP_LOGE(TAG, "Weather request URL is too long");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    cJSON *json = NULL;
+    esp_err_t err = request_json(url, "AMap live weather response", &json);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = require_amap_success(json, "Weather query");
+    if (err != ESP_OK) {
+        goto cleanup;
+    }
+
+    const cJSON *lives = cJSON_GetObjectItemCaseSensitive(json, "lives");
+    if (!cJSON_IsArray(lives) || cJSON_GetArraySize(lives) == 0) {
+        ESP_LOGE(TAG, "Weather response contains an empty lives array");
+        err = ESP_FAIL;
+    }
+
+cleanup:
+    cJSON_Delete(json);
+    return err;
 }
 
-static void https_get_request_using_specified_ciphersuites(void)
+static void amap_weather_task(void *arg)
 {
-#if CONFIG_EXAMPLE_USING_ESP_TLS_MBEDTLS
+    (void)arg;
 
-    ESP_LOGI(TAG, "https_request using server supported ciphersuites");
-    esp_tls_cfg_t cfg = {
-        .cacert_buf = (const unsigned char *) server_root_cert_pem_start,
-        .cacert_bytes = server_root_cert_pem_end - server_root_cert_pem_start,
-        .ciphersuites_list = server_supported_ciphersuites,
-    };
-
-    https_get_request(cfg, WEB_URL, HOWSMYSSL_REQUEST);
-
-    ESP_LOGI(TAG, "https_request using server unsupported ciphersuites");
-
-    cfg.ciphersuites_list = server_unsupported_ciphersuites;
-
-    https_get_request(cfg, WEB_URL, HOWSMYSSL_REQUEST);
-#endif
-}
-
-static void https_get_request_using_global_ca_store(void)
-{
-    esp_err_t esp_ret = ESP_FAIL;
-    ESP_LOGI(TAG, "https_request using global ca_store");
-    esp_ret = esp_tls_set_global_ca_store(server_root_cert_pem_start, server_root_cert_pem_end - server_root_cert_pem_start);
-    if (esp_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error in setting the global ca store: [%02X] (%s),could not complete the https_request using global_ca_store", esp_ret, esp_err_to_name(esp_ret));
+    if (CONFIG_AMAP_API_KEY[0] == '\0') {
+        ESP_LOGE(TAG, "AMap API Key is not configured");
+        vTaskDelete(NULL);
         return;
     }
-    esp_tls_cfg_t cfg = {
-        .use_global_ca_store = true,
-    };
-    https_get_request(cfg, WEB_URL, HOWSMYSSL_REQUEST);
-    esp_tls_free_global_ca_store();
-}
 
-#ifdef CONFIG_EXAMPLE_CLIENT_SESSION_TICKETS
-static void https_get_request_to_local_server(const char* url)
-{
-    ESP_LOGI(TAG, "https_request to local server");
-    esp_tls_cfg_t cfg = {
-        .cacert_buf = (const unsigned char *) local_server_cert_pem_start,
-        .cacert_bytes = local_server_cert_pem_end - local_server_cert_pem_start,
-        .skip_common_name = true,
-    };
-    save_client_session = true;
-    https_get_request(cfg, url, LOCAL_SRV_REQUEST);
-}
-
-static void https_get_request_using_already_saved_session(const char *url)
-{
-    ESP_LOGI(TAG, "https_request using saved client session");
-    esp_tls_cfg_t cfg = {
-        .client_session = tls_client_session,
-        .cacert_buf = (const unsigned char *) local_server_cert_pem_start,
-        .cacert_bytes = local_server_cert_pem_end - local_server_cert_pem_start,
-        .skip_common_name = true,
-    };
-    https_get_request(cfg, url, LOCAL_SRV_REQUEST);
-    esp_tls_free_client_session(tls_client_session);
-    save_client_session = false;
-    tls_client_session = NULL;
-}
-#endif
-
-static void https_request_task(void *pvparameters)
-{
-    ESP_LOGI(TAG, "Start https_request example");
-
-#ifdef CONFIG_EXAMPLE_CLIENT_SESSION_TICKETS
-    char *server_url = NULL;
-#ifdef CONFIG_EXAMPLE_LOCAL_SERVER_URL_FROM_STDIN
-    char url_buf[SERVER_URL_MAX_SZ];
-    if (strcmp(CONFIG_EXAMPLE_LOCAL_SERVER_URL, "FROM_STDIN") == 0) {
-        example_configure_stdin_stdout();
-        fgets(url_buf, SERVER_URL_MAX_SZ, stdin);
-        int len = strlen(url_buf);
-        url_buf[len - 1] = '\0';
-        server_url = url_buf;
-    } else {
-        ESP_LOGE(TAG, "Configuration mismatch: invalid url for local server");
-        abort();
+    char adcode[ADCODE_BUFFER_SIZE] = DEFAULT_ADCODE;
+    if (query_ip_location(adcode, sizeof(adcode)) != ESP_OK) {
+        memcpy(adcode, DEFAULT_ADCODE, sizeof(DEFAULT_ADCODE));
+        ESP_LOGW(TAG, "IP location is unavailable, using %s (adcode=%s)", DEFAULT_CITY_NAME, adcode);
     }
-    printf("\nServer URL obtained is %s\n", url_buf);
-#else
-    server_url = CONFIG_EXAMPLE_LOCAL_SERVER_URL;
-#endif /* CONFIG_EXAMPLE_LOCAL_SERVER_URL_FROM_STDIN */
-    https_get_request_to_local_server(server_url);
-    https_get_request_using_already_saved_session(server_url);
-#endif
 
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE && CONFIG_EXAMPLE_USING_ESP_TLS_MBEDTLS
-    https_get_request_using_crt_bundle();
-#endif
-    ESP_LOGI(TAG, "Minimum free heap size: %" PRIu32 " bytes", esp_get_minimum_free_heap_size());
-    https_get_request_using_cacert_buf();
-    https_get_request_using_global_ca_store();
-    https_get_request_using_specified_ciphersuites();
-    ESP_LOGI(TAG, "Finish https_request example");
+    if (query_live_weather(adcode) != ESP_OK) {
+        ESP_LOGE(TAG, "AMap live weather query failed");
+    } else {
+        ESP_LOGI(TAG, "AMap live weather query completed");
+    }
+
     vTaskDelete(NULL);
 }
 
@@ -316,25 +263,10 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
     ESP_ERROR_CHECK(example_connect());
 
-    if (esp_reset_reason() == ESP_RST_POWERON) {
-        ESP_LOGI(TAG, "Updating time from NVS");
-        ESP_ERROR_CHECK(update_time_from_nvs());
+    BaseType_t task_created = xTaskCreate(amap_weather_task, "amap_weather", 8192, NULL, 5, NULL);
+    if (task_created != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create AMap weather task");
     }
-
-    const esp_timer_create_args_t nvs_update_timer_args = {
-            .callback = (void *)&fetch_and_store_time_in_nvs,
-    };
-
-    esp_timer_handle_t nvs_update_timer;
-    ESP_ERROR_CHECK(esp_timer_create(&nvs_update_timer_args, &nvs_update_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(nvs_update_timer, TIME_PERIOD));
-
-    xTaskCreate(&https_request_task, "https_get_task", 8192, NULL, 5, NULL);
 }

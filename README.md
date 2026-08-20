@@ -1,89 +1,34 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- |
+# ESP-IDF 高德实况天气
 
-# HTTPS Request Example
+工程启动后连接网络，先调用高德 IP 定位接口获取 `adcode`，再使用该
+`adcode` 调用实况天气接口。IP 定位请求或响应不可用时，改为查询广州
+（`adcode=440100`）。
 
-Uses APIs from `esp-tls` component to make a very simple HTTPS request over a secure connection, including verifying the server TLS certificate.
+HTTPS 请求使用 ESP-IDF 内置的 CA 证书包校验高德服务器证书，不需要嵌入
+高德站点专属证书。接口响应和运行状态使用标准 `ESP_LOGI`、`ESP_LOGW` 和
+`ESP_LOGE` 输出，不进行 JSON 美化或 ANSI 高亮。
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+工程关闭了 mbedTLS 的证书有效期时间校验，因此 HTTPS 请求不依赖 SNTP
+校时。通用 CA 证书包仍用于验证服务器证书链和域名。
 
-### Session Tickets
+## 配置
 
-Session Tickets, specified in [RFC 5077](https://datatracker.ietf.org/doc/html/rfc5077) are a mechanism to distribute encrypted
-session-state information to the client in the form of a ticket and a mechanism to present the ticket back to the server.  The ticket is created by a TLS server and sent to a TLS client.  The TLS client presents the ticket to the TLS server to resume a session. In TLS 1.2, this speeds up handshakes from two to one round-trip.
-
-In ESP-IDF, this feature is supported (for both server and client) when mbedTLS is used as the SSL library.
-
-## How to use example
-Before project configuration and build, be sure to set the correct chip target using `idf.py set-target <chip_name>`.
-
-### Hardware Required
-
-* A development board with ESP32/ESP32-S2/ESP32-C3 SoC (e.g., ESP32-DevKitC, ESP-WROVER-KIT, etc.)
-* A USB cable for power supply and programming
-
-### Configure the project
-
-```
+```sh
 idf.py menuconfig
 ```
-Open the project configuration menu (`idf.py menuconfig`) to configure Wi-Fi or Ethernet. See "Establishing Wi-Fi or Ethernet Connection" section in [examples/protocols/README.md](../../README.md) for more details.
 
-#### Configuring Client Session Tickets
+- 在 `Example Connection Configuration` 中配置 Wi-Fi。工程默认使用
+  SSID `VTK` 和密码 `AA12345678@`。
+- 在 `AMap Weather Configuration` 中配置 `AMap Web Service API Key`。
+  工程已按 `amap_weather.py` 提供的 Key 设置默认值。
 
-Note: This example has client session tickets enabled by default.
+当前工程目标由 `sdkconfig` 中的 `CONFIG_IDF_TARGET` 确定。
 
-* Open the project configuration menu (`idf.py menuconfig`)
-* In the `Component Config` -> `ESP-TLS` submenu, select the `Enable client session tickets` option.
+## 请求流程
 
-Ensure that the server has the session tickets feature enabled.
-
-### Build and Flash
-
-Build the project and flash it to the board, then run monitor tool to view serial output:
-
-```
-idf.py -p PORT flash monitor
-```
-
-(Replace PORT with the name of the serial port to use.)
-
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-See the Getting Started Guide for full steps to configure and use ESP-IDF to build projects.
-
-## Example Output
-
-```
-I (5634) example_connect: - IPv4 address: 192.168.194.219
-I (5634) example_connect: - IPv6 address: fe80:0000:0000:0000:266f:28ff:fe80:2c74, type: ESP_IP6_ADDR_IS_LINK_LOCAL
-I (5644) example: Start https_request example
-I (5654) example: https_request using crt bundle
-W (6514) wifi:<ba-add>idx:1 (ifx:0, ee:6d:19:60:f6:0e), tid:4, ssn:0, winSize:64
-I (7074) esp-x509-crt-bundle: Certificate validated
-I (9384) example: Connection established...
-I (9384) example: 107 bytes written
-I (9384) example: Reading HTTP response...
-HTTP/1.1 200 OK
-Content-Length: 2091
-Access-Control-Allow-Origin: *
-Connection: close
-Content-Type: application/json
-Date: Tue, 07 Sep 2021 08:30:00 GMT
-Strict-Transport-Security: max-age=631138519; includeSubdomains; preload
-
-{"given_cipher_suites":["TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384","TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384","TLS_DHE_RSA_WITH_AES_256_GCM_SHA384","TLS_ECDHE_ECDSA_WITH_AES_256_CCM","TLS_DHE_RSA_WITH_AES_256_CCM","TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384","TLS_ECDHE_RSA_WITH_AES_
-256_CBC_SHA384","TLS_DHE_RSA_WITH_AES_256_CBC_SHA256","TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA","TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA","TLS_DHE_RSA_WITH_AES_256_CBC_SHA","TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8","TLS_DHE_RSA_WITH_AES_256_CCM_8","TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256","TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256","TLS_DHE_RSA_WITH_AES_128_GCM_SHA256","TLS_ECDHE_ECDSA_WITH_AES_128_CCM","TLS_DHE_RSA_WITH_AES_128_CCM","TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256","TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256","TLS_DHE
-_RSA_WITH_AES_128_CBC_SHA256","TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA","TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA","TLS_DHE_RSA_WITH_AES_128_CBC_SHA","TLS_ECDHE_ECDSA
-_WITH_AES_128_CCM_8","TLS_DHE_RSA_WITH_AES_128_CCM_8","TLS_RSA_WITH_AES_256_GCM_SHA384","TLS_RSA_WITH_AES_256_CCM","TLS_RSA_WITH_AES_256_CBC_SHA256","TLS_RSA_WITH_AES_256_CBC_SHA","TLS_ECDH_RSA_WITH_AES_256_GCM_SHA384","TLS_ECDH_RSA_WITH_AES_256_CBC_SHA384","TLS_ECDH_RSA_WITH_AES_256_CBC_SHA","TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384","TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384","TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA","TLS_RSA_WITH_AES_256_CCM_8","TLS_RSA_WITH_AES_128_GCM_SHA256","TLS_RSA_WITH_AES_128_CCM","TLS_RS
-A_WITH_AES_128_CBC_SHA256","TLS_RSA_WITH_AES_128_CBC_SHA","TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256","TLS_ECDH_RSA_WITH_AES_128_CBC_SHA256","TLS_ECDH_RSA_WITH_AES_128_CBC_SHA","TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256","TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256","TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA","TLS_RSA_WITH_AES_128_CCM_8","TLS_EMPTY_RENEGOTIATION_INFO_SCSV"],"ephemeral_keys_supported":true,"session_ticket_supported":true,"tls_compression_supported":false,"unknown_cipher_suite_supported":false,"beast_vuln":fal
-se,"able_to_detect_n_minus_one_splitting":false,"insecure_cipher_suites":{},"tls_version":"TLS 1.2","rating":"Probably Okay"}
-I (10204) example: connection closed
-I (10204) example: 10...
-I (11204) example: 9...
-I (12204) example: 8...
-I (13204) example: 7...
-I (14204) example: 6...
-I (15204) example: 5...
-I (16204) example: 4...
-```
+1. 请求 `https://restapi.amap.com/v3/ip`。
+2. 校验高德公共字段 `status`，并读取非空 `adcode`。
+3. 定位失败时使用默认 `adcode=440100`。
+4. 请求 `https://restapi.amap.com/v3/weather/weatherInfo`，参数
+   `extensions=base`。
+5. 校验 `status` 和非空 `lives` 数组，原样记录高德 JSON 响应。
