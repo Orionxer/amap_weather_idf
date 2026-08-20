@@ -56,11 +56,10 @@ idf.py build && idf.py -b 6000000 flash && idf.py monitor
 ```sh
 esptool --chip esp32c5 -b 6000000 write_flash 0x0 amap_weather-esp32c5-merged.bin
 ```
-
-![烧录合并固件成功](./screenshot/flash_merged_bin.png)
-
 > [!Important]
 > 通过此方式烧录合并固件，需要你确保附近有menuconfig中默认的Wi-Fi SSID及对应的Password，否则设备无法联网
+
+![烧录合并固件成功](./screenshot/flash_merged_bin.png)
 
 ## 请求流程
 
@@ -70,7 +69,7 @@ esptool --chip esp32c5 -b 6000000 write_flash 0x0 amap_weather-esp32c5-merged.bi
 4. 请求 `https://restapi.amap.com/v3/weather/weatherInfo`
 5. 校验 `status` 和非空 `lives` 数组，原样记录高德 JSON 响应。
 
-### 关闭证书有效期校验
+## 关闭证书有效期校验
 工程关闭了 mbedTLS 的证书有效期时间校验，因此 HTTPS 请求不依赖 SNTP 校时。但是，通用 CA 证书包 **esp_crt_bundle_attach** 仍用于验证服务器证书链和域名。
 
 ## python测试
