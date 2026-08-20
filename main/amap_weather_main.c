@@ -1,5 +1,5 @@
 /*
- * Query AMap IP location first, then query live weather by adcode.
+ * AMap IP location and live weather client.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -263,6 +263,7 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_ERROR_CHECK(example_connect());
 
     BaseType_t task_created = xTaskCreate(amap_weather_task, "amap_weather", 8192, NULL, 5, NULL);

@@ -18,9 +18,12 @@ idf.py menuconfig
 ```
 
 - 在 `Example Connection Configuration` 中配置 Wi-Fi。工程默认使用
-  SSID `VTK` 和密码 `AA12345678@`。
+  SSID `VTK`、密码 `AA12345678@` 和 WPA2 扫描认证阈值。
 - 在 `AMap Weather Configuration` 中配置 `AMap Web Service API Key`。
   工程已按 `amap_weather.py` 提供的 Key 设置默认值。
+
+工程按开发板实际容量将 Flash 配置为 16MB，并在连接前将 Wi-Fi 驱动日志
+限制为 Error；高德请求及应用日志仍保持默认 Info 级别。
 
 当前工程目标由 `sdkconfig` 中的 `CONFIG_IDF_TARGET` 确定。
 
