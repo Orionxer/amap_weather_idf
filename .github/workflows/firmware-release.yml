@@ -84,7 +84,7 @@ jobs:
           )
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: |
@@ -104,7 +104,7 @@ jobs:
 
     steps:
       - name: Download firmware artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: ${{ env.RELEASE_DIR }}
