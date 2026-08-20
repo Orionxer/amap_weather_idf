@@ -1,0 +1,14 @@
+﻿.vscode/
+build/
+.cache/
+managed_components/
+dependencies.lock
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local ESP-IDF configuration
+sdkconfig
+sdkconfig.old
