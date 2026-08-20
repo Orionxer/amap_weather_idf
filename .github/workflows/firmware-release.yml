@@ -141,7 +141,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="Latest ESP32-C5 firmware"
+          release_title="ESP32-C5 - Latest Build"
           release_notes=$(printf '%s\n\n%s\n%s\n%s\n' \
             'Automated rolling build from the main branch.' \
             "- Commit: [${GITHUB_SHA}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})" \
