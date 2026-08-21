@@ -47,17 +47,15 @@ idf.py build && idf.py -b 6000000 flash && idf.py monitor
 ![查询成功](./screenshot/query_success.png)
 
 ## 合并固件烧录
+> [!Important]
+> 通过此方式烧录合并固件，需要你确保附近有menuconfig中默认的Wi-Fi SSID及对应的Password，否则设备无法联网
 
-> 请自行查找乐鑫文档，准备好可以烧录的环境，Windows使用 `esptool.exe` , Mac/Linux使用 `esptool` 命令 
+进入 [最新发布页面](https://github.com/Orionxer/amap_weather_idf/releases/tag/latest)，下载固件 **amap_weather-esp32c5-merged.bin**，Windows使用 `esptool.exe` , Mac/Linux使用 `esptool` 命令进行烧录
 
-进入 [最新发布页面](https://github.com/Orionxer/amap_weather_idf/releases/tag/latest)，下载固件 **amap_weather-esp32c5-merged.bin**，该固件已合并，烧录地址从 `0x0` 开始。
-
-烧录命令如下，根据实际情况调整参数
+烧录命令如下，烧录地址从 `0x0` 开始
 ```sh
 esptool --chip esp32c5 -b 6000000 write_flash 0x0 amap_weather-esp32c5-merged.bin
 ```
-> [!Important]
-> 通过此方式烧录合并固件，需要你确保附近有menuconfig中默认的Wi-Fi SSID及对应的Password，否则设备无法联网
 
 ![烧录合并固件成功](./screenshot/flash_merged_bin.png)
 
