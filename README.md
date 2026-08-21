@@ -7,7 +7,7 @@
 ![Target](https://img.shields.io/badge/target-ESP32--C5-000000?logo=espressif)
 
 > [!Note]
-> 实现ESP32-C5连接WiFi后，通过[高德IP定位接口](https://lbs.amap.com/api/webservice/guide/api/ipconfig)自动获取城市定位和[高德天气查询接口](https://lbs.amap.com/api/webservice/guide/api/ipconfig)查询当地实况天气。
+> 实现ESP32-C5连接WiFi后，通过[高德IP定位接口](https://lbs.amap.com/api/webservice/guide/api/ipconfig)自动获取城市定位和[高德天气查询接口](https://lbs.amap.com/api/webservice/guide/api/weatherinfo)查询当地实况天气。
 
 ## 环境准备
 - ESP-IDF v5.5.3
