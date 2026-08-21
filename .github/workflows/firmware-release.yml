@@ -50,11 +50,8 @@ jobs:
         with:
           esp_idf_version: ${{ env.IDF_VERSION }}
           target: ${{ env.IDF_TARGET }}
-          path: build
-          command: >-
-            esptool.py --chip esp32c5 merge_bin
-            -o ../release/amap_weather-esp32c5-merged.bin
-            @flash_args
+          path: .
+          command: idf.py merge-bin -o merged-flash.bin
 
       - name: Package firmware files
         shell: bash
@@ -68,6 +65,7 @@ jobs:
           cp build/bootloader/bootloader.bin "${package_dir}/bootloader/"
           cp build/partition_table/partition-table.bin "${package_dir}/partition_table/"
           cp build/flash_args build/flasher_args.json "${package_dir}/"
+          cp build/merged-flash.bin "${RELEASE_DIR}/amap_weather-esp32c5-merged.bin"
 
           test -s "${RELEASE_DIR}/amap_weather-esp32c5-merged.bin"
           test -s "${package_dir}/amap_weather.bin"

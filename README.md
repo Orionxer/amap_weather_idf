@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/github/license/Orionxer/amap_weather_idf)](./LICENSE)
 [![Repository Size](https://img.shields.io/github/repo-size/Orionxer/amap_weather_idf)](https://github.com/Orionxer/amap_weather_idf)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5.3-E7352C?logo=espressif)](https://github.com/espressif/esp-idf/releases/tag/v5.5.3)
-![Target](https://img.shields.io/badge/target-ESP32--C5-000000?logo=espressif)
+![Target](https://img.shields.io/badge/target-ESP32--C5-E7352C?logo=espressif)
 
 > [!Note]
 > 实现ESP32-C5连接WiFi后，通过[高德IP定位接口](https://lbs.amap.com/api/webservice/guide/api/ipconfig)自动获取城市定位和[高德天气查询接口](https://lbs.amap.com/api/webservice/guide/api/weatherinfo)查询当地实况天气。
