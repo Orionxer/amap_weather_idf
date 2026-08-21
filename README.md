@@ -77,10 +77,6 @@ esptool --chip esp32c5 -b 6000000 write_flash 0x0 amap_weather-esp32c5-merged.bi
 python3 amap_weather.py
 ```
 
-## 开源协议
-
-本项目基于 [MIT License](./LICENSE) 开源。
-
 ## 参考
 - [高德IP定位接口文档](https://lbs.amap.com/api/webservice/guide/api/ipconfig)
 - [高德天气查询接口文档](https://lbs.amap.com/api/webservice/guide/api-advanced/weatherinfo)
