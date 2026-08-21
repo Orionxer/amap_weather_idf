@@ -32,7 +32,7 @@ idf.py set-target esp32c5
 
 进入配置后进行以下设置
 - 在 `Example Connection Configuration` 中配置 Wi-Fi。工程默认使用SSID `VTK`、密码 `AA12345678@`
-- 在 `AMap Weather Configuration` 中配置 `AMap Web Service API Key`。
+- 在 `AMap Weather Configuration` 中配置 `AMap Web Service API Key`，进入 [高德开放平台-管理后台](https://console.amap.com/dev/index)， 创建Key的入口在 **创建新应用** ，根据要求补充信息即可
 ```sh
 idf.py menuconfig
 ```
